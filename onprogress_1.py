@@ -121,12 +121,8 @@ y_train = y.iloc[:split_idx]
 X_test = X.iloc[split_idx:]
 y_test = y.iloc[split_idx:]
 
-# define the mathematical imbalance
-imbalance_ratio = len(y_train[y_train == 0]) / len(y_train[y_train == 1])
-
 # create a blank baseline model
 base_model = xgb.XGBClassifier(
-    scale_pos_weight=imbalance_ratio,
     random_state=42
 )
 
