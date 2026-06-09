@@ -80,11 +80,11 @@ df['BB_Lower'] = bb_mean - (bb_std * 2)
 df['BB_Position'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'] + 1e-8)
 
 # Support and Resistance
-df['Resistance_50'] = df['High'].shift(1).rolling(window=50).max()
-df['Support_50'] = df['Low'].shift(1).rolling(window=50).min()
+df['Resistance_60'] = df['High'].shift(1).rolling(window=60).max()
+df['Support_60'] = df['Low'].shift(1).rolling(window=60).min()
 # Now, if Close breaks ABOVE Resistance, the distance becomes NEGATIVE
-df['Dist_To_Resistance_50'] = (df['Resistance_50'] - df['Close']) / df['Close']
-df['Dist_To_Support_50'] = (df['Close'] - df['Support_50']) / df['Close']
+df['Dist_To_Resistance_60'] = (df['Resistance_60'] - df['Close']) / df['Close']
+df['Dist_To_Support_60'] = (df['Close'] - df['Support_60']) / df['Close']
 
 # --- Microstructure / Volume ---
 # Relative Volume (RVOL)
@@ -98,10 +98,10 @@ df.dropna(inplace=True)
 # drop Future_Close column so the model can't cheat by looking at it
 df.drop(columns=['Future_Close_15m'], inplace=True)
 
-print(f"Final Dataset Shape: {df.shape}")
+
 print("\nSample Features:")
 print(df[['Close', 'Target_Class', 'Return_60m', 'RSI_7', 'BB_Position']].head())
-cols_to_drop = ['Resistance_50', 'Support_50', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50', 'ATR_14', 'Volume']
+cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50', 'ATR_14', 'Volume']
 df.drop(columns=cols_to_drop, inplace=True)
 
 
@@ -121,6 +121,7 @@ y_train = y.iloc[:split_idx]
 X_test = X.iloc[split_idx:]
 y_test = y.iloc[split_idx:]
 
+
 # create a blank baseline model
 base_model = xgb.XGBClassifier(
     random_state=42
@@ -131,7 +132,7 @@ base_model = xgb.XGBClassifier(
 # learning_rate: How aggressively it corrects its mistakes
 # subsample: What % of the data it looks at per tree (prevents overfitting)
 param_grid = {
-    'max_depth': [3, 5, 7],
+    'max_depth': [3, 4, 5],
     'learning_rate': [0.01, 0.05, 0.1],
     'subsample': [0.8, 1.0],
     'n_estimators': [100]
