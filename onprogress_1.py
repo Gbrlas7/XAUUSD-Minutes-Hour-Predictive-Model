@@ -86,6 +86,14 @@ df['Support_60'] = df['Low'].shift(1).rolling(window=60).min()
 df['Dist_To_Resistance_60'] = (df['Resistance_60'] - df['Close']) / df['Close']
 df['Dist_To_Support_60'] = (df['Close'] - df['Support_60']) / df['Close']
 
+# Dow Theory
+df['Prev_Resistance_60'] = df['High'].shift(61).rolling(window=60).max()
+df['Prev_Support_60'] = df['Low'].shift(61).rolling(window=60).min()
+# Positive = Higher Highs (Dow Uptrend). Negative = Lower Highs (Dow Downtrend).
+df['Dow_High_Structure'] = (df['Resistance_60'] - df['Prev_Resistance_60']) / df['Prev_Resistance_60']
+# Positive = Higher Lows (Dow Uptrend). Negative = Lower Lows (Dow Downtrend).
+df['Dow_Low_Structure'] = (df['Support_60'] - df['Prev_Support_60']) / df['Prev_Support_60']
+
 # --- Microstructure / Volume ---
 # Relative Volume (RVOL)
 df['Vol_vs_60m_Avg'] = df['Volume'] / (df['Volume'].rolling(window=60).mean() + 1e-8)
@@ -101,7 +109,7 @@ df.drop(columns=['Future_Close_15m'], inplace=True)
 
 print("\nSample Features:")
 print(df[['Close', 'Target_Class', 'Return_60m', 'RSI_7', 'BB_Position']].head())
-cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50', 'ATR_14', 'Volume']
+cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50', 'ATR_14', 'Volume', 'Prev_Resistance_60', 'Prev_Support_60']
 df.drop(columns=cols_to_drop, inplace=True)
 
 
