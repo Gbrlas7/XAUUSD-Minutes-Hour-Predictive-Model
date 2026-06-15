@@ -107,6 +107,61 @@ df['Vol_vs_60m_Avg'] = df['Volume'] / (df['Volume'].rolling(window=60).mean() + 
 # Price Volume Trends (take accounts not just absolute volume but volume from buy or sell)
 df['Price_Vol_Trend'] = np.sign(df['Return_1m']) * df['Vol_vs_60m_Avg']
 
+
+
+# CHART PATTERNS
+
+# The Double Top
+# Definition: Two consecutive peaks are almost exactly the same height, 
+# and the price just broke below the local support (the neckline).
+is_equal_peaks = df['Dow_High_Structure'].abs() < 0.0005
+is_neckline_broken = df['Dist_To_Support_60'] < 0
+# Convert boolean (True/False) to integers (1/0) for XGBoost
+df['Pattern_Double_Top'] = (is_equal_peaks & is_neckline_broken).astype(int)
+
+# The Double Bottom
+# Definition: Two consecutive floors are almost exactly the same depth,
+# and the price just broke above the local resistance (the neckline).
+is_equal_floors = df['Dow_Low_Structure'].abs() < 0.0005
+is_resistance_broken = df['Dist_To_Resistance_60'] < 0
+df['Pattern_Double_Bottom'] = (is_equal_floors & is_resistance_broken).astype(int)
+
+# Head & Shoulders
+# Resistance_60 = Right Shoulder | Prev_Resistance_60 = Head | Prev_Prev = Left Shoulder
+df['Prev_Prev_Resistance_60'] = df['High'].shift(121).rolling(window=60).max()
+is_head_taller_than_left = df['Prev_Resistance_60'] > df['Prev_Prev_Resistance_60']
+is_right_lower_than_head = df['Resistance_60'] < df['Prev_Resistance_60']
+
+is_shoulders_even = ((df['Resistance_60'] - df['Prev_Prev_Resistance_60']).abs() / df['Prev_Prev_Resistance_60']) < 0.002
+is_neckline_broken = df['Dist_To_Support_60'] < 0
+is_hs_setup = is_head_taller_than_left & is_right_lower_than_head & is_shoulders_even
+df['Pattern_Head_Shoulders'] = (is_hs_setup & is_neckline_broken).astype(int)
+
+# Inverse Head & Shoulders
+df['Prev_Prev_Support_60'] = df['Low'].shift(121).rolling(window=60).min()
+is_head_deeper_than_left = df['Prev_Support_60'] < df['Prev_Prev_Support_60']
+is_right_higher_than_head = df['Support_60'] > df['Prev_Support_60']
+
+is_inv_shoulders_even = ((df['Support_60'] - df['Prev_Prev_Support_60']).abs() / df['Prev_Prev_Support_60']) < 0.002
+is_inv_neckline_broken = df['Dist_To_Resistance_60'] < 0
+is_inv_hs_setup = is_head_deeper_than_left & is_right_higher_than_head & is_inv_shoulders_even
+df['Pattern_Inv_Head_Shoulders'] = (is_inv_hs_setup & is_inv_neckline_broken).astype(int)
+
+# Symmetrical Triangle/Wedge Squeeze (Continuation)
+# Definition: Volatility has completely compressed to its lowest levels.
+# measure this by checking if the current Bollinger Band width is small
+bb_width = (df['BB_Upper'] - df['BB_Lower']) / df['Close']
+is_volatility_crushed = bb_width < 0.002
+# We only trigger the pattern if the volatility is crushed AND volume suddenly spikes
+is_volume_surging = df['Vol_vs_60m_Avg'] > 1.5
+is_breakout_event = is_volatility_crushed & is_volume_surging
+
+is_breaking_up = df['Return_1m'] > 0
+is_breaking_down = df['Return_1m'] < 0
+df['Pattern_Wedge_Up'] = (is_breakout_event & is_breaking_up).astype(int)
+df['Pattern_Wedge_Down'] = (is_breakout_event & is_breaking_down).astype(int)
+
+
 # CLEANUP
 # drop all NaNs created by the 15m target shift and the 60m historical rolling windows
 df.dropna(inplace=True)
