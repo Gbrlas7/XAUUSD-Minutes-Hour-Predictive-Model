@@ -94,6 +94,13 @@ df['Dow_High_Structure'] = (df['Resistance_60'] - df['Prev_Resistance_60']) / df
 # Positive = Higher Lows (Dow Uptrend). Negative = Lower Lows (Dow Downtrend).
 df['Dow_Low_Structure'] = (df['Support_60'] - df['Prev_Support_60']) / df['Prev_Support_60']
 
+# Stochastic
+roll_high = df['High'].rolling(window=14).max()
+roll_low = df['Low'].rolling(window=14).min()
+df['Stoch_K'] = 100 * ((df['Close'] - roll_low) / (roll_high - roll_low + 1e-8))
+df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
+df['Stoch_K_vs_D'] = df['Stoch_K'] - df['Stoch_D']
+
 # --- Microstructure / Volume ---
 # Relative Volume (RVOL)
 df['Vol_vs_60m_Avg'] = df['Volume'] / (df['Volume'].rolling(window=60).mean() + 1e-8)
