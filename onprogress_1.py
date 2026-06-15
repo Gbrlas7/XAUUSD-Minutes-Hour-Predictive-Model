@@ -169,8 +169,6 @@ df.dropna(inplace=True)
 df.drop(columns=['Future_Close_15m'], inplace=True)
 
 
-print("\nSample Features:")
-print(df[['Close', 'Target_Class', 'Return_60m', 'RSI_7', 'BB_Position']].head())
 cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50', 'ATR_14', 'Volume', 'Prev_Resistance_60', 'Prev_Support_60', 'Prev_Prev_Resistance_60', 'Prev_Prev_Support_60']
 df.drop(columns=cols_to_drop, inplace=True)
 
