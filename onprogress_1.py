@@ -28,13 +28,14 @@ df['Target_Class'] = np.where(df['Target_15m_Return'] > 0.0001, 1, 0)
 
 
 
+# INDICATORS
 
-# --- Momentum ---
+# MomentuM
 windows = [1, 3, 5, 15, 60]
 for w in windows:
     df[f'Return_{w}m'] = df['Close'].pct_change(periods=w) # generate return(1,3,5,15,60 min) in percentage
 
-# --- Volatility ---
+# Volatility
 df['Rolling_Vol_15m'] = df['Return_1m'].rolling(window=15).std() # groups the current minute and 14 minutes before it and gives its std
 df['Rolling_Vol_60m'] = df['Return_1m'].rolling(window=60).std()
 
@@ -46,7 +47,6 @@ true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1) # 
 df['ATR_14'] = true_range.rolling(window=14).mean() # mean of the last 14 min true range
 df['NATR_14'] = df['ATR_14'] / df['Close']
 
-# --- Technical Oscillators ---
 # RSI (Relative Strength Index)
 # RSI looks at the size of recent gains versus recent losses over a set period (usually 14 periods) and converts that into a score from 0 to 100
 delta = df['Close'].diff() # calculates diff between previous row from current row value
@@ -102,15 +102,17 @@ df['VWAP'] = df['Cum_Vol_x_Price_Day'] / (df['Cum_Vol_Day'] + 1e-8)
 # Negative = Price is below the institutional average (Oversold)
 df['Dist_To_VWAP'] = (df['Close'] - df['VWAP']) / df['VWAP']
 
-
-
-
 # Support and Resistance
 df['Resistance_60'] = df['High'].shift(1).rolling(window=60).max()
 df['Support_60'] = df['Low'].shift(1).rolling(window=60).min()
 # Now, if Close breaks ABOVE Resistance, the distance becomes NEGATIVE
 df['Dist_To_Resistance_60'] = (df['Resistance_60'] - df['Close']) / df['Close']
 df['Dist_To_Support_60'] = (df['Close'] - df['Support_60']) / df['Close']
+
+
+
+
+# TECHNICAL ANALYSIS THEORIES
 
 # Dow Theory
 df['Prev_Resistance_60'] = df['High'].shift(61).rolling(window=60).max()
