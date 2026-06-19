@@ -79,6 +79,32 @@ df['BB_Upper'] = bb_mean + (bb_std * 2)
 df['BB_Lower'] = bb_mean - (bb_std * 2)
 df['BB_Position'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'] + 1e-8)
 
+# Stochastic
+roll_high = df['High'].rolling(window=14).max()
+roll_low = df['Low'].rolling(window=14).min()
+df['Stoch_K'] = 100 * ((df['Close'] - roll_low) / (roll_high - roll_low + 1e-8))
+df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
+df['Stoch_K_vs_D'] = df['Stoch_K'] - df['Stoch_D']
+
+# Microstructure / Volume
+# Relative Volume (RVOL)
+df['Vol_vs_60m_Avg'] = df['Volume'] / (df['Volume'].rolling(window=60).mean() + 1e-8)
+# Price Volume Trends (take accounts not just absolute volume but volume from buy or sell)
+df['Price_Vol_Trend'] = np.sign(df['Return_1m']) * df['Vol_vs_60m_Avg']
+
+# VWAP
+df['Typical_Price'] = (df['High'] + df['Low'] + df['Close']) / 3
+df['Vol_x_Price'] = df['Typical_Price'] * df['Volume']
+df['Cum_Vol_Day'] = df.groupby(df.index.date)['Volume'].cumsum()
+df['Cum_Vol_x_Price_Day'] = df.groupby(df.index.date)['Vol_x_Price'].cumsum()
+df['VWAP'] = df['Cum_Vol_x_Price_Day'] / (df['Cum_Vol_Day'] + 1e-8)
+# Positive = Price is above the institutional average (Overbought)
+# Negative = Price is below the institutional average (Oversold)
+df['Dist_To_VWAP'] = (df['Close'] - df['VWAP']) / df['VWAP']
+
+
+
+
 # Support and Resistance
 df['Resistance_60'] = df['High'].shift(1).rolling(window=60).max()
 df['Support_60'] = df['Low'].shift(1).rolling(window=60).min()
@@ -94,18 +120,40 @@ df['Dow_High_Structure'] = (df['Resistance_60'] - df['Prev_Resistance_60']) / df
 # Positive = Higher Lows (Dow Uptrend). Negative = Lower Lows (Dow Downtrend).
 df['Dow_Low_Structure'] = (df['Support_60'] - df['Prev_Support_60']) / df['Prev_Support_60']
 
-# Stochastic
-roll_high = df['High'].rolling(window=14).max()
-roll_low = df['Low'].rolling(window=14).min()
-df['Stoch_K'] = 100 * ((df['Close'] - roll_low) / (roll_high - roll_low + 1e-8))
-df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
-df['Stoch_K_vs_D'] = df['Stoch_K'] - df['Stoch_D']
+# Elliott Wave Theory
+# define the macro swing high and swing low (e.g., last 120 minutes)
+macro_window = 120
+df['Macro_High_120'] = df['High'].rolling(window=macro_window).max()
+df['Macro_Low_120'] = df['Low'].rolling(window=macro_window).min()
+macro_range = df['Macro_High_120'] - df['Macro_Low_120']
+# calculate retracement depth
+# 0.0 means no pullback, 1.0 means 100% retracement
+# 0.618 means price has pulled back exactly 61.8% from the high (Golden Ratio)
+df['Fibonacci_Retracement'] = (df['Macro_High_120'] - df['Close']) / (macro_range + 1e-8)
+# Is the price currently resting right in the "Elliott Wave Bounce Zone" (between 50% and 61.8%)?
+is_in_golden_pocket = (df['Fibonacci_Retracement'] > 0.50) & (df['Fibonacci_Retracement'] < 0.62)
+df['Pattern_Fib_Golden_Pocket'] = is_in_golden_pocket.astype(int)
 
-# --- Microstructure / Volume ---
-# Relative Volume (RVOL)
-df['Vol_vs_60m_Avg'] = df['Volume'] / (df['Volume'].rolling(window=60).mean() + 1e-8)
-# Price Volume Trends (take accounts not just absolute volume but volume from buy or sell)
-df['Price_Vol_Trend'] = np.sign(df['Return_1m']) * df['Vol_vs_60m_Avg']
+# Wyckoff Method
+# Effort vs. Result
+candle_body_size = np.abs(df['Close'] - df['Open']) / df['Close']
+# divide effort (relative volume) by result (candle size)
+# very high number means massive volume but the price went nowhere (Absorption)
+df['Wyckoff_Effort_Result'] = df['Vol_vs_60m_Avg'] / (candle_body_size + 1e-8)
+# The "Spring"
+# Rule 1: The absolute Low of the minute broke below the 50-minute floor
+went_below_support = df['Low'] < df['Support_60']
+# Rule 2: But the minute Closed back safely ABOVE the floor (Retail was trapped)
+closed_above_support = df['Close'] > df['Support_60']
+# Rule 3: High volume during this
+high_volume_trap = df['Vol_vs_60m_Avg'] > 1.2
+df['Pattern_Wyckoff_Spring'] = (went_below_support & closed_above_support & high_volume_trap).astype(int)
+# The "Upthrust" (inverse of the Spring)
+went_above_resistance = df['High'] > df['Resistance_60']
+closed_below_resistance = df['Close'] < df['Resistance_60']
+df['Pattern_Wyckoff_Upthrust'] = (went_above_resistance & closed_below_resistance & high_volume_trap).astype(int)
+
+
 
 
 
@@ -147,7 +195,7 @@ is_inv_neckline_broken = df['Dist_To_Resistance_60'] < 0
 is_inv_hs_setup = is_head_deeper_than_left & is_right_higher_than_head & is_inv_shoulders_even
 df['Pattern_Inv_Head_Shoulders'] = (is_inv_hs_setup & is_inv_neckline_broken).astype(int)
 
-# Symmetrical Triangle/Wedge Squeeze (Continuation)
+# 3. The Symmetrical Triangle / Wedge Squeeze (Continuation)
 # Definition: Volatility has completely compressed to its lowest levels.
 # measure this by checking if the current Bollinger Band width is small
 bb_width = (df['BB_Upper'] - df['BB_Lower']) / df['Close']
@@ -161,7 +209,6 @@ is_breaking_down = df['Return_1m'] < 0
 df['Pattern_Wedge_Up'] = (is_breakout_event & is_breaking_up).astype(int)
 df['Pattern_Wedge_Down'] = (is_breakout_event & is_breaking_down).astype(int)
 
-
 # CLEANUP
 # drop all NaNs created by the 15m target shift and the 60m historical rolling windows
 df.dropna(inplace=True)
@@ -169,7 +216,11 @@ df.dropna(inplace=True)
 df.drop(columns=['Future_Close_15m'], inplace=True)
 
 
-cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50', 'ATR_14', 'Volume', 'Prev_Resistance_60', 'Prev_Support_60', 'Prev_Prev_Resistance_60', 'Prev_Prev_Support_60']
+print("\nSample Features:")
+print(df[['Close', 'Target_Class', 'Return_60m', 'RSI_7', 'BB_Position']].head())
+cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50',
+                'ATR_14', 'Volume', 'Typical_Price', 'Vol_x_Price', 'Cum_Vol_Day', 'Cum_Vol_x_Price_Day', 'VWAP', 'Prev_Resistance_60', 
+                'Prev_Support_60', 'Prev_Prev_Resistance_60', 'Prev_Prev_Support_60', 'Macro_High_120', 'Macro_Low_120']
 df.drop(columns=cols_to_drop, inplace=True)
 
 
