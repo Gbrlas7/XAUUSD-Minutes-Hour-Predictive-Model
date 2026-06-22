@@ -227,6 +227,10 @@ df.drop(columns=cols_to_drop, inplace=True)
 import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import classification_report
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+
+warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 X = df.drop(columns=['Target_15m_Return', 'Target_Class'])
 y = df['Target_Class']
