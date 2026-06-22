@@ -1,23 +1,19 @@
 import pandas as pd
 import numpy as np
 
-# In the CSV, it has 3 level headlines, so we just use the second header and change it's column name
-df = pd.read_csv("high_Frequency_Gold_Vola tility_2026.csv", header=1) # skipped the 1st header(index 0) and start from 2nd header
-df = df.rename(columns={
-    'Ticker': 'Datetime', 'GC=F': 'Close', 'GC=F.1': 'High', 
-    'GC=F.2': 'Low', 'GC=F.3': 'Open', 'GC=F.4': 'Volume'
-})
-df = df.iloc[1:].reset_index(drop=True) # drop the empty "Datetime" headline row
 
-# 2. Format columns
-df['Datetime'] = pd.to_datetime(df['Datetime']) # convert string to special panda 'Datetime' objects
+# In the CSV, it has 3 level headlines, so we just use the second header and change it's column name
+df = pd.read_csv("gold_1m_2023_2026.csv")
+
+# Format columns
+df['Date'] = pd.to_datetime(df['Date']) # convert string to special panda 'Datetime' objects
 numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
 df[numeric_cols] = df[numeric_cols].astype(float) # convert string to float
-df = df.sort_values('Datetime') # making sure the data is in order(in terms of time))
-df.set_index('Datetime', inplace=True) # set as index
+df = df.sort_values('Date') # making sure the data is in order(in terms of time))
+df.set_index('Date', inplace=True) # set as index
 
 
-# 3. Create the Target (Predicting the return 15 minutes into the future)
+# Create the Target (Predicting the return 15 minutes into the future)
 # shift the close price 15 steps backwards(upwards) to align future prices with current rows
 df['Future_Close_15m'] = df['Close'].shift(-15)
 df['Target_15m_Return'] = (df['Future_Close_15m'] - df['Close']) / df['Close'] # this will be in percentage
