@@ -1,0 +1,394 @@
+import pandas as pd
+import numpy as np
+
+
+# In the CSV, it has 3 level headlines, so we just use the second header and change it's column name
+df = pd.read_csv("gold_15m_2024_2026.csv")
+
+# Format columns
+df['Date'] = pd.to_datetime(df['Date']) # convert string to special panda 'Datetime' objects
+numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+df[numeric_cols] = df[numeric_cols].astype(float) # convert string to float
+df = df.sort_values('Date') # making sure the data is in order(in terms of time))
+df.set_index('Date', inplace=True) # set as index
+
+
+# Create the Target (Predicting the return 15 minutes into the future)
+# shift the close price 15 steps backwards(upwards) to align future prices with current rows
+df['Future_Close_15m'] = df['Close'].shift(-8)
+df['Target_15m_Return'] = (df['Future_Close_15m'] - df['Close']) / df['Close'] # this will be in percentage
+
+# 4. Create a classification target (1 if return > 0.01%, 0 otherwise)
+df['Target_Class'] = np.where(df['Target_15m_Return'] > 0.0001, 1, 0)
+
+
+
+
+
+# INDICATORS
+
+# MomentuM
+windows = [1, 5, 15, 60, 120]
+for w in windows:
+    df[f'Return_{w}m'] = df['Close'].pct_change(periods=w) # generate return(1,3,5,15,60 min) in percentage
+
+# Volatility
+df['Rolling_Vol_15m'] = df['Return_1m'].rolling(window=15).std() # groups the current minute and 14 minutes before it and gives its std
+df['Rolling_Vol_60m'] = df['Return_1m'].rolling(window=60).std()
+df['Rolling_Vol_120m'] = df['Return_1m'].rolling(window=120).std()
+
+high_low = df['High'] - df['Low'] # calculates the distance between high and low in the current minute
+high_close = np.abs(df['High'] - df['Close'].shift(1)) # These calculate the absolute distance (np.abs()) from the previous minute's closing price to the current minute's high and low.
+low_close = np.abs(df['Low'] - df['Close'].shift(1))
+true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1) # puts those three distances side-by-side and uses .max(axis=1) to pick the biggest for every single row
+#Average True Range (ATR)
+df['ATR_14'] = true_range.rolling(window=14).mean() # mean of the last 14 min true range
+df['NATR_14'] = df['ATR_14'] / df['Close']
+
+# RSI (Relative Strength Index)
+# RSI looks at the size of recent gains versus recent losses over a set period (usually 14 periods) and converts that into a score from 0 to 100
+delta = df['Close'].diff() # calculates diff between previous row from current row value
+gain = delta.where(delta > 0, 0)
+loss = -delta.where(delta < 0, 0)
+avg_gain = gain.rolling(window=7).mean()
+avg_loss = loss.rolling(window=7).mean()
+rs = avg_gain / (avg_loss + 1e-8)
+df['RSI_7'] = 100 - (100 / (1 + rs))
+
+# Moving Average
+# looks at the relationship between two moving averages: a "fast" short-term average (12 periods) and a "slow" long-term average (26 periods)
+# creates a rolling window that assigns exponentially decreasing weights to older prices
+df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
+df['EMA_21'] = df['Close'].ewm(span=21, adjust=False).mean()
+df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean() 
+# distance to EMA (Stationary Mean-Reversion Feature)
+# Positive = Price is above the EMA. Negative = Price is below the EMA.
+df['Dist_To_EMA_9'] = (df['Close'] - df['EMA_9']) / df['EMA_9']
+df['Dist_To_EMA_50'] = (df['Close'] - df['EMA_50']) / df['EMA_50']
+
+# Positive = Fast EMA is above Slow EMA (Bullish Trend)
+# Negative = Fast EMA is below Slow EMA (Bearish Trend)
+df['EMA_9_vs_21'] = (df['EMA_9'] - df['EMA_21']) / df['EMA_21']
+
+# Bollinger Bands
+bb_mean = df['Close'].rolling(window=20).mean()
+bb_std = df['Close'].rolling(window=20).std()
+df['BB_Upper'] = bb_mean + (bb_std * 2)
+df['BB_Lower'] = bb_mean - (bb_std * 2)
+df['BB_Position'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'] + 1e-8)
+
+# Stochastic
+roll_high = df['High'].rolling(window=14).max()
+roll_low = df['Low'].rolling(window=14).min()
+df['Stoch_K'] = 100 * ((df['Close'] - roll_low) / (roll_high - roll_low + 1e-8))
+df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
+df['Stoch_K_vs_D'] = df['Stoch_K'] - df['Stoch_D']
+
+# Microstructure / Volume
+# Relative Volume (RVOL)
+df['Vol_vs_60m_Avg'] = df['Volume'] / (df['Volume'].rolling(window=60).mean() + 1e-8)
+# Price Volume Trends (take accounts not just absolute volume but volume from buy or sell)
+df['Price_Vol_Trend'] = np.sign(df['Return_1m']) * df['Vol_vs_60m_Avg']
+
+# VWAP
+df['Typical_Price'] = (df['High'] + df['Low'] + df['Close']) / 3
+df['Vol_x_Price'] = df['Typical_Price'] * df['Volume']
+df['Cum_Vol_Day'] = df.groupby(df.index.date)['Volume'].cumsum()
+df['Cum_Vol_x_Price_Day'] = df.groupby(df.index.date)['Vol_x_Price'].cumsum()
+df['VWAP'] = df['Cum_Vol_x_Price_Day'] / (df['Cum_Vol_Day'] + 1e-8)
+# Positive = Price is above the institutional average (Overbought)
+# Negative = Price is below the institutional average (Oversold)
+df['Dist_To_VWAP'] = (df['Close'] - df['VWAP']) / df['VWAP']
+
+# Support and Resistance
+df['Resistance_60'] = df['High'].shift(1).rolling(window=60).max()
+df['Support_60'] = df['Low'].shift(1).rolling(window=60).min()
+# Now, if Close breaks ABOVE Resistance, the distance becomes NEGATIVE
+df['Dist_To_Resistance_60'] = (df['Resistance_60'] - df['Close']) / df['Close']
+df['Dist_To_Support_60'] = (df['Close'] - df['Support_60']) / df['Close']
+
+
+
+
+# TECHNICAL ANALYSIS THEORIES
+
+# Dow Theory
+df['Prev_Resistance_60'] = df['High'].shift(61).rolling(window=60).max()
+df['Prev_Support_60'] = df['Low'].shift(61).rolling(window=60).min()
+# Positive = Higher Highs (Dow Uptrend). Negative = Lower Highs (Dow Downtrend).
+df['Dow_High_Structure'] = (df['Resistance_60'] - df['Prev_Resistance_60']) / df['Prev_Resistance_60']
+# Positive = Higher Lows (Dow Uptrend). Negative = Lower Lows (Dow Downtrend).
+df['Dow_Low_Structure'] = (df['Support_60'] - df['Prev_Support_60']) / df['Prev_Support_60']
+
+# Elliott Wave Theory
+# define the macro swing high and swing low (e.g., last 120 minutes)
+macro_window = 120
+df['Macro_High_120'] = df['High'].rolling(window=macro_window).max()
+df['Macro_Low_120'] = df['Low'].rolling(window=macro_window).min()
+macro_range = df['Macro_High_120'] - df['Macro_Low_120']
+# calculate retracement depth
+# 0.0 means no pullback, 1.0 means 100% retracement
+# 0.618 means price has pulled back exactly 61.8% from the high (Golden Ratio)
+df['Fibonacci_Retracement'] = (df['Macro_High_120'] - df['Close']) / (macro_range + 1e-8)
+# Is the price currently resting right in the "Elliott Wave Bounce Zone" (between 50% and 61.8%)?
+is_in_golden_pocket = (df['Fibonacci_Retracement'] > 0.50) & (df['Fibonacci_Retracement'] < 0.62)
+df['Pattern_Fib_Golden_Pocket'] = is_in_golden_pocket.astype(int)
+
+# Wyckoff Method
+# Effort vs. Result
+candle_body_size = np.abs(df['Close'] - df['Open']) / df['Close']
+# divide effort (relative volume) by result (candle size)
+# very high number means massive volume but the price went nowhere (Absorption)
+df['Wyckoff_Effort_Result'] = df['Vol_vs_60m_Avg'] / (candle_body_size + 1e-8)
+# The "Spring"
+# Rule 1: The absolute Low of the minute broke below the 50-minute floor
+went_below_support = df['Low'] < df['Support_60']
+# Rule 2: But the minute Closed back safely ABOVE the floor (Retail was trapped)
+closed_above_support = df['Close'] > df['Support_60']
+# Rule 3: High volume during this
+high_volume_trap = df['Vol_vs_60m_Avg'] > 1.2
+df['Pattern_Wyckoff_Spring'] = (went_below_support & closed_above_support & high_volume_trap).astype(int)
+# The "Upthrust" (inverse of the Spring)
+went_above_resistance = df['High'] > df['Resistance_60']
+closed_below_resistance = df['Close'] < df['Resistance_60']
+df['Pattern_Wyckoff_Upthrust'] = (went_above_resistance & closed_below_resistance & high_volume_trap).astype(int)
+
+
+
+
+
+# CHART PATTERNS
+
+# The Double Top
+# Definition: Two consecutive peaks are almost exactly the same height, 
+# and the price just broke below the local support (the neckline).
+is_equal_peaks = df['Dow_High_Structure'].abs() < 0.0005
+is_neckline_broken = df['Dist_To_Support_60'] < 0
+# Convert boolean (True/False) to integers (1/0) for XGBoost
+df['Pattern_Double_Top'] = (is_equal_peaks & is_neckline_broken).astype(int)
+
+# The Double Bottom
+# Definition: Two consecutive floors are almost exactly the same depth,
+# and the price just broke above the local resistance (the neckline).
+is_equal_floors = df['Dow_Low_Structure'].abs() < 0.0005
+is_resistance_broken = df['Dist_To_Resistance_60'] < 0
+df['Pattern_Double_Bottom'] = (is_equal_floors & is_resistance_broken).astype(int)
+
+# Head & Shoulders
+# Resistance_60 = Right Shoulder | Prev_Resistance_60 = Head | Prev_Prev = Left Shoulder
+df['Prev_Prev_Resistance_60'] = df['High'].shift(121).rolling(window=60).max()
+is_head_taller_than_left = df['Prev_Resistance_60'] > df['Prev_Prev_Resistance_60']
+is_right_lower_than_head = df['Resistance_60'] < df['Prev_Resistance_60']
+
+is_shoulders_even = ((df['Resistance_60'] - df['Prev_Prev_Resistance_60']).abs() / df['Prev_Prev_Resistance_60']) < 0.002
+is_neckline_broken = df['Dist_To_Support_60'] < 0
+is_hs_setup = is_head_taller_than_left & is_right_lower_than_head & is_shoulders_even
+df['Pattern_Head_Shoulders'] = (is_hs_setup & is_neckline_broken).astype(int)
+
+# Inverse Head & Shoulders
+df['Prev_Prev_Support_60'] = df['Low'].shift(121).rolling(window=60).min()
+is_head_deeper_than_left = df['Prev_Support_60'] < df['Prev_Prev_Support_60']
+is_right_higher_than_head = df['Support_60'] > df['Prev_Support_60']
+
+is_inv_shoulders_even = ((df['Support_60'] - df['Prev_Prev_Support_60']).abs() / df['Prev_Prev_Support_60']) < 0.002
+is_inv_neckline_broken = df['Dist_To_Resistance_60'] < 0
+is_inv_hs_setup = is_head_deeper_than_left & is_right_higher_than_head & is_inv_shoulders_even
+df['Pattern_Inv_Head_Shoulders'] = (is_inv_hs_setup & is_inv_neckline_broken).astype(int)
+
+# 3. The Symmetrical Triangle / Wedge Squeeze (Continuation)
+# Definition: Volatility has completely compressed to its lowest levels.
+# measure this by checking if the current Bollinger Band width is small
+bb_width = (df['BB_Upper'] - df['BB_Lower']) / df['Close']
+is_volatility_crushed = bb_width < 0.002
+# We only trigger the pattern if the volatility is crushed AND volume suddenly spikes
+is_volume_surging = df['Vol_vs_60m_Avg'] > 1.5
+is_breakout_event = is_volatility_crushed & is_volume_surging
+
+is_breaking_up = df['Return_1m'] > 0
+is_breaking_down = df['Return_1m'] < 0
+df['Pattern_Wedge_Up'] = (is_breakout_event & is_breaking_up).astype(int)
+df['Pattern_Wedge_Down'] = (is_breakout_event & is_breaking_down).astype(int)
+
+# CLEANUP
+# drop all NaNs created by the 15m target shift and the 60m historical rolling windows
+df.dropna(inplace=True)
+# drop Future_Close column so the model can't cheat by looking at it
+df.drop(columns=['Future_Close_15m'], inplace=True)
+cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50',
+                'ATR_14', 'Volume', 'Typical_Price', 'Vol_x_Price', 'Cum_Vol_Day', 'Cum_Vol_x_Price_Day', 'VWAP', 'Prev_Resistance_60', 
+                'Prev_Support_60', 'Prev_Prev_Resistance_60', 'Prev_Prev_Support_60', 'Macro_High_120', 'Macro_Low_120']
+df.drop(columns=cols_to_drop, inplace=True)
+
+
+
+
+
+import xgboost as xgb
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import classification_report
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+
+# Mute the division-by-zero warnings generated inside GridSearchCV
+warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
+
+X = df.drop(columns=['Target_15m_Return', 'Target_Class'])
+y = df['Target_Class']
+
+# chronological train/test split (80% train, 20% test)
+split_idx = int(len(df) * 0.8)
+X_train = X.iloc[:split_idx]
+y_train = y.iloc[:split_idx]
+X_test = X.iloc[split_idx:]
+y_test = y.iloc[split_idx:]
+test_duration = X_test.index.max() - X_test.index.min()
+print(f"Test Set Timeline: {X_test.index.min()} to {X_test.index.max()}")
+print(f"Total Test Duration: {test_duration}")
+
+# create a blank baseline model
+base_model = xgb.XGBClassifier(
+    random_state=42
+)
+
+# define the Grid (the settings we want to test)
+# max_depth: How many consecutive IF/THEN rules the tree can make
+# learning_rate: How aggressively it corrects its mistakes
+# subsample: What % of the data it looks at per tree (prevents overfitting)
+param_grid = {
+    'max_depth': [4],
+    'learning_rate': [0.01],
+    'subsample': [0.8],
+    'n_estimators': [300],
+    'scale_pos_weight': [1.1]
+}
+
+# initialize grid search
+# cv=3 means it will test each combination 3 times to ensure it wasn't a fluke
+# scoring='precision' forces it to strictly optimize for high-quality Buy signals
+grid_search = GridSearchCV(
+    estimator=base_model, 
+    param_grid=param_grid, 
+    scoring='precision', 
+    cv=3, 
+    verbose=1
+)
+
+# running the search
+grid_search.fit(X_train, y_train)
+
+# find the ultimate model
+print(f"Best Settings Found: {grid_search.best_params_}")
+
+best_model = grid_search.best_estimator_
+
+# making predicition using the best model
+y_pred = best_model.predict(X_test)
+
+# evaluation of the best model
+print("\n--- Optimized Classification Report ---")
+print(classification_report(y_test, y_pred, zero_division=0))
+
+importance = pd.Series(best_model.feature_importances_, index=X.columns)
+top_features = importance.sort_values(ascending=False).head(5)
+print("\n--- Top 5 Most Important Features ---")
+print(top_features)
+
+
+
+
+
+
+# 1. Create a results dataframe aligned with your test data dates
+backtest = pd.DataFrame(index=X_test.index)
+
+# 2. Get the actual forward 15-minute return of the asset
+backtest['Actual_Return_15m'] = df.loc[X_test.index, 'Target_15m_Return']
+
+# 3. Get the raw probabilities from XGBoost
+probabilities = best_model.predict_proba(X_test)
+backtest['Prob_Sell'] = probabilities[:, 0]
+backtest['Prob_Buy'] = probabilities[:, 1]
+
+# 4. Define Confidence Thresholds & Generate Signals
+# 1 = Long (Buy), -1 = Short (Sell), 0 = Cash (Do nothing)
+buy_threshold = 0.65
+sell_threshold = 0.65
+backtest['Signal'] = 0 # Default to holding cash
+backtest.loc[backtest['Prob_Buy'] > buy_threshold, 'Signal'] = 1
+backtest.loc[backtest['Prob_Sell'] > sell_threshold, 'Signal'] = -1
+
+# 5. Define Market Frictions (Spread + Slippage + Commission)
+transaction_cost = 0.0002 
+
+# 6. Calculate Strategy Returns
+# We shift the signal by 1 because a signal generated at 10:00 AM 
+backtest['Position'] = backtest['Signal'].shift(1)
+# A trade occurs when the position changes (e.g., from 0 to 1, or 1 to -1)
+backtest['Trade_Executed'] = (backtest['Position'] != backtest['Position'].shift(1)).astype(int)
+backtest['Strategy_Return'] = (backtest['Position'] * backtest['Actual_Return_15m']) - (backtest['Trade_Executed'] * transaction_cost)
+
+# 7. Calculate Cumulative Growth
+backtest['Market_Cumulative'] = (1 + backtest['Actual_Return_15m']).cumprod()
+backtest['Strategy_Cumulative'] = (1 + backtest['Strategy_Return']).cumprod()
+
+
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+
+# 1. Calculate Core Performance Metrics
+# Assuming 252 trading days a year, and 96 15-minute periods per day (24 hours)
+periods_per_year = 252 * 96 
+
+# Total Return
+total_strat_return = backtest['Strategy_Cumulative'].iloc[-1] - 1
+total_market_return = backtest['Market_Cumulative'].iloc[-1] - 1
+
+# Annualized Volatility (Risk)
+strat_volatility = backtest['Strategy_Return'].std() * np.sqrt(periods_per_year)
+
+# Sharpe Ratio (Risk-Adjusted Return, assuming 0% risk-free rate for simplicity)
+sharpe_ratio = (backtest['Strategy_Return'].mean() * periods_per_year) / (strat_volatility + 1e-8)
+
+# Win Rate (Only counting periods where a trade was actively held)
+active_trades = backtest[backtest['Position'] != 0]
+win_rate = len(active_trades[active_trades['Strategy_Return'] > 0]) / (len(active_trades) + 1e-8)
+
+# Maximum Drawdown (The worst peak-to-trough drop)
+rolling_max = backtest['Strategy_Cumulative'].cummax()
+drawdown = (backtest['Strategy_Cumulative'] - rolling_max) / rolling_max
+max_drawdown = drawdown.min()
+
+# 2. Build the Visualization Dashboard
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1]})
+fig.suptitle('XGBoost 15m Quantitative Strategy Tearsheet', fontsize=18, fontweight='bold')
+
+# --- Panel 1: Cumulative Equity Curve ---
+ax1.plot(backtest.index, backtest['Strategy_Cumulative'], label='XGBoost Strategy (Post-Friction)', color='#00ff00', linewidth=2)
+ax1.plot(backtest.index, backtest['Market_Cumulative'], label='Buy & Hold Baseline', color='#888888', alpha=0.7, linestyle='--')
+ax1.set_title('Cumulative Return vs. Baseline', fontsize=14)
+ax1.set_ylabel('Growth of $1')
+ax1.legend(loc='upper left')
+ax1.grid(True, alpha=0.3)
+
+metrics_text = (
+    f"Total Return: {total_strat_return:.2%}\n"
+    f"Sharpe Ratio: {sharpe_ratio:.2f}\n"
+    f"Win Rate: {win_rate:.2%}\n"
+    f"Max Drawdown: {max_drawdown:.2%}\n"
+    f"Annual Volatility: {strat_volatility:.2%}"
+)
+ax1.text(0.02, 0.75, metrics_text, transform=ax1.transAxes, fontsize=12,
+         verticalalignment='top', bbox=dict(boxstyle='round', facecolor='black', alpha=0.8, edgecolor='white'))
+
+# --- Panel 2: Underwater Plot (Drawdowns) ---
+ax2.fill_between(backtest.index, drawdown, 0, color='#ff0000', alpha=0.5)
+ax2.set_title('Underwater Plot (Drawdowns)', fontsize=14)
+ax2.set_ylabel('Drawdown %')
+ax2.set_xlabel('Date')
+ax2.grid(True, alpha=0.3)
+
+ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+fig.autofmt_xdate()
+plt.show()
