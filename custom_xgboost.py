@@ -24,6 +24,7 @@ model = xgb.XGBClassifier(
     learning_rate=0.01,
     max_depth=4,
     scale_pos_weight=1.1, # Forces the model to care about minor class
+    subsample=0.8
     random_state=42
 )
 
