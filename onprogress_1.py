@@ -3,7 +3,7 @@ import numpy as np
 
 
 # In the CSV, it has 3 level headlines, so we just use the second header and change it's column name
-df = pd.read_csv("gold_1m_2023_2026.csv")
+df = pd.read_csv("gold_1m_2024_2026.csv")
 
 # Format columns
 df['Date'] = pd.to_datetime(df['Date']) # convert string to special panda 'Datetime' objects
@@ -24,16 +24,18 @@ df['Target_Class'] = np.where(df['Target_15m_Return'] > 0.0001, 1, 0)
 
 
 
+
 # INDICATORS
 
 # MomentuM
-windows = [1, 3, 5, 15, 60]
+windows = [1, 5, 15, 60, 120]
 for w in windows:
     df[f'Return_{w}m'] = df['Close'].pct_change(periods=w) # generate return(1,3,5,15,60 min) in percentage
 
 # Volatility
 df['Rolling_Vol_15m'] = df['Return_1m'].rolling(window=15).std() # groups the current minute and 14 minutes before it and gives its std
 df['Rolling_Vol_60m'] = df['Return_1m'].rolling(window=60).std()
+df['Rolling_Vol_120m'] = df['Return_1m'].rolling(window=120).std()
 
 high_low = df['High'] - df['Low'] # calculates the distance between high and low in the current minute
 high_close = np.abs(df['High'] - df['Close'].shift(1)) # These calculate the absolute distance (np.abs()) from the previous minute's closing price to the current minute's high and low.
@@ -212,14 +214,11 @@ df['Pattern_Wedge_Down'] = (is_breakout_event & is_breaking_down).astype(int)
 df.dropna(inplace=True)
 # drop Future_Close column so the model can't cheat by looking at it
 df.drop(columns=['Future_Close_15m'], inplace=True)
-
-
-print("\nSample Features:")
-print(df[['Close', 'Target_Class', 'Return_60m', 'RSI_7', 'BB_Position']].head())
 cols_to_drop = ['Resistance_60', 'Support_60', 'High', 'Low', 'Open', 'Close', 'BB_Upper', 'BB_Lower', 'EMA_9', 'EMA_21', 'EMA_50',
                 'ATR_14', 'Volume', 'Typical_Price', 'Vol_x_Price', 'Cum_Vol_Day', 'Cum_Vol_x_Price_Day', 'VWAP', 'Prev_Resistance_60', 
                 'Prev_Support_60', 'Prev_Prev_Resistance_60', 'Prev_Prev_Support_60', 'Macro_High_120', 'Macro_Low_120']
 df.drop(columns=cols_to_drop, inplace=True)
+
 
 
 
@@ -230,6 +229,7 @@ from sklearn.metrics import classification_report
 import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 
+# Mute the division-by-zero warnings generated inside GridSearchCV
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 X = df.drop(columns=['Target_15m_Return', 'Target_Class'])
@@ -241,7 +241,9 @@ X_train = X.iloc[:split_idx]
 y_train = y.iloc[:split_idx]
 X_test = X.iloc[split_idx:]
 y_test = y.iloc[split_idx:]
-
+test_duration = X_test.index.max() - X_test.index.min()
+print(f"Test Set Timeline: {X_test.index.min()} to {X_test.index.max()}")
+print(f"Total Test Duration: {test_duration}")
 
 # create a blank baseline model
 base_model = xgb.XGBClassifier(
@@ -253,10 +255,11 @@ base_model = xgb.XGBClassifier(
 # learning_rate: How aggressively it corrects its mistakes
 # subsample: What % of the data it looks at per tree (prevents overfitting)
 param_grid = {
-    'max_depth': [3, 4, 5],
-    'learning_rate': [0.01, 0.05, 0.1],
-    'subsample': [0.8, 1.0],
-    'n_estimators': [100]
+    'max_depth': [4],
+    'learning_rate': [0.01],
+    'subsample': [0.8],
+    'n_estimators': [300],
+    'scale_pos_weight': [1.1]
 }
 
 # initialize grid search
