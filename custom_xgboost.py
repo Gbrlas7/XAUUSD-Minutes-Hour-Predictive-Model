@@ -19,12 +19,11 @@ y_test = y.iloc[split_idx:]
 # - learning_rate=0.05: Slower learning prevents the model from overreacting to noise.
 # - max_depth=4: Keeps the trees shallow to prevent overfitting (memorizing the training data).
 # Calculate the ratio of negative to positive samples
-imbalance_ratio = len(y_train[y_train == 0]) / len(y_train[y_train == 1])
 model = xgb.XGBClassifier(
-    n_estimators=100,
-    learning_rate=0.05,
+    n_estimators=300,
+    learning_rate=0.01,
     max_depth=4,
-    scale_pos_weight=imbalance_ratio, # Forces the model to care about minor class
+    scale_pos_weight=1.1, # Forces the model to care about minor class
     random_state=42
 )
 
