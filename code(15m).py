@@ -20,7 +20,7 @@ df['Target_15m_Return'] = (df['Future_Close_15m'] - df['Close']) / df['Close'] #
 
 # 4. Create a classification target (1 if return > 0.01%, 0 otherwise)
 df['Target_Class'] = np.where(df['Target_15m_Return'] > 0.0001, 1, 0)
-
+df['Next_Candle_Return'] = df['Close'].shift(-1) / df['Close'] - 1
 
 
 
@@ -232,7 +232,7 @@ from sklearn.exceptions import UndefinedMetricWarning
 # Mute the division-by-zero warnings generated inside GridSearchCV
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
-X = df.drop(columns=['Target_15m_Return', 'Target_Class'])
+X = df.drop(columns=['Target_15m_Return', 'Target_Class', 'Next_Candle_Return'])
 y = df['Target_Class']
 
 # chronological train/test split (80% train, 20% test)
@@ -302,20 +302,27 @@ print(top_features)
 backtest = pd.DataFrame(index=X_test.index)
 
 # 2. Get the actual forward 15-minute return of the asset
-backtest['Actual_Return_15m'] = df.loc[X_test.index, 'Target_15m_Return']
+backtest['Next_Candle_Return'] = df.loc[X_test.index, 'Next_Candle_Return']
 
 # 3. Get the raw probabilities from XGBoost
 probabilities = best_model.predict_proba(X_test)
 backtest['Prob_Sell'] = probabilities[:, 0]
 backtest['Prob_Buy'] = probabilities[:, 1]
 
-# 4. Define Confidence Thresholds & Generate Signals
-# 1 = Long (Buy), -1 = Short (Sell), 0 = Cash (Do nothing)
-buy_threshold = 0.65
-sell_threshold = 0.65
-backtest['Signal'] = 0 # Default to holding cash
-backtest.loc[backtest['Prob_Buy'] > buy_threshold, 'Signal'] = 1
-backtest.loc[backtest['Prob_Sell'] > sell_threshold, 'Signal'] = -1
+# 4. Define Asymmetric Thresholds (Hysteresis)
+entry_threshold = 0.65
+exit_threshold = 0.45  # Give the trade room to breathe
+
+# We use np.select to create stateful logic
+conditions = [
+    backtest['Prob_Buy'] > entry_threshold,    # Condition to enter Long
+    backtest['Prob_Buy'] < exit_threshold      # Condition to exit to Cash
+]
+choices = [1, 0]
+# If neither condition is met, it returns NaN. 
+# We then forward-fill (ffill) the NaN so it simply holds whatever position it was already in.
+backtest['Signal'] = np.select(conditions, choices, default=np.nan)
+backtest['Signal'] = backtest['Signal'].ffill().fillna(0)
 
 # 5. Define Market Frictions (Spread + Slippage + Commission)
 transaction_cost = 0.0002 
@@ -325,10 +332,10 @@ transaction_cost = 0.0002
 backtest['Position'] = backtest['Signal'].shift(1)
 # A trade occurs when the position changes (e.g., from 0 to 1, or 1 to -1)
 backtest['Trade_Executed'] = (backtest['Position'] != backtest['Position'].shift(1)).astype(int)
-backtest['Strategy_Return'] = (backtest['Position'] * backtest['Actual_Return_15m']) - (backtest['Trade_Executed'] * transaction_cost)
+backtest['Strategy_Return'] = (backtest['Position'] * backtest['Next_Candle_Return']) - (backtest['Trade_Executed'] * transaction_cost)
 
 # 7. Calculate Cumulative Growth
-backtest['Market_Cumulative'] = (1 + backtest['Actual_Return_15m']).cumprod()
+backtest['Market_Cumulative'] = (1 + backtest['Next_Candle_Return']).cumprod()
 backtest['Strategy_Cumulative'] = (1 + backtest['Strategy_Return']).cumprod()
 
 
