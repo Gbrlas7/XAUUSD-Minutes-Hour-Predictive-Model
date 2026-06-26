@@ -26,10 +26,10 @@ base_model = xgb.XGBClassifier(
 # learning_rate: How aggressively it corrects its mistakes
 # subsample: What % of the data it looks at per tree (prevents overfitting)
 param_grid = {
-    'max_depth': [3, 5, 7],
-    'learning_rate': [0.01, 0.05, 0.1],
+    'max_depth': [3, 4, 5],
+    'learning_rate': [0.01, 0.05],
     'subsample': [0.8, 1.0],
-    'n_estimators': [100]
+    'n_estimators': [100, 300, 500]
 }
 
 # initialize grid search
