@@ -25,7 +25,7 @@ df['Next_Candle_Return'] = df['Close'].shift(-1) / df['Close'] - 1
 
 
 
-#hgii
+
 # INDICATORS
 
 # MomentuM
