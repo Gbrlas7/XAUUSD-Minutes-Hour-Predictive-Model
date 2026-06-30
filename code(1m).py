@@ -312,17 +312,13 @@ backtest['Prob_Buy'] = probabilities[:, 1]
 
 # 4. Define Asymmetric Thresholds (Hysteresis)
 entry_threshold = 0.55
-exit_threshold = 0.45  # Give the trade room to breathe
-
-# We use np.select to create stateful logic
+exit_threshold = 0.45 
 conditions = [
     backtest['Prob_Buy'] > entry_threshold,    # Condition to enter Long
     backtest['Prob_Buy'] < exit_threshold      # Condition to exit to Cash
 ]
 choices = [1, 0]
 # If neither condition is met, it returns NaN. 
-# We then forward-fill (ffill) the NaN so it simply holds whatever position it was already in.
-backtest['Signal'] = np.select(conditions, choices, default=np.nan)
 backtest['Signal'] = backtest['Signal'].ffill().fillna(0)
 
 # 5. Define Market Frictions (Spread + Slippage + Commission)
